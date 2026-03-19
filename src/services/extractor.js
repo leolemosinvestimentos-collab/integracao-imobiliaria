@@ -12,15 +12,20 @@ function extractLeadData(payload) {
   // 1) Tenta ler direto de payload.lead (formato mais comum)
   const lead = payload.lead || payload.contact || {};
 
-  let name  = lead.name  || lead.nome  || lead.full_name || lead.fullName || '';
+  let name  = lead.contactName || lead.name  || lead.nome  || lead.full_name || lead.fullName || '';
   let email = lead.email || lead.e_mail || lead.email_address || '';
-  let phone = lead.phone || lead.telefone || lead.celular || lead.whatsapp || '';
+  let phone = lead.contactPhone || lead.phone || lead.telefone || lead.celular || lead.whatsapp || '';
 
   // 2) Tenta payload.variables (variáveis de fluxo do GPT Maker)
   const vars = payload.variables || payload.vars || {};
-  if (!name)  name  = vars.name  || vars.nome  || vars.full_name || '';
+  if (!name)  name  = vars.contactName || vars.name  || vars.nome  || vars.full_name || '';
   if (!email) email = vars.email || vars.e_mail || '';
-  if (!phone) phone = vars.phone || vars.telefone || vars.celular || vars.whatsapp || '';
+  if (!phone) phone = vars.contactPhone || vars.phone || vars.telefone || vars.celular || vars.whatsapp || '';
+
+  // 3) Tenta campos raiz do payload (GPT Maker às vezes envia na raiz)
+  if (!name)  name  = payload.contactName || payload.name  || payload.nome  || '';
+  if (!email) email = payload.email || payload.e_mail || '';
+  if (!phone) phone = payload.contactPhone || payload.phone || payload.telefone || payload.celular || payload.whatsapp || '';
 
   // 3) Fallback: busca por regex no histórico de mensagens
   if ((!email || !phone) && Array.isArray(payload.messages)) {
