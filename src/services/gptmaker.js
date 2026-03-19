@@ -12,14 +12,8 @@ function buildHeaders() {
 }
 
 /**
- * Dispara uma mensagem ativa via GPT Maker para um número de WhatsApp.
- * Usa o endpoint /v2/agent/{agentId}/conversation (texto livre, sem flowId).
- *
- * Variáveis de ambiente necessárias:
- *   GPTMAKER_API_TOKEN    → token da API (Settings > Developers > API Keys)
- *   GPTMAKER_AGENT_ID     → ID do agente (visível na URL do agente no painel)
- *
- * Ref: https://developer.gptmaker.ai/api-reference/agents/conversation
+ * Dispara mensagem ativa para um lead via agente da Patrícia.
+ *   GPTMAKER_AGENT_ID → agente que atende clientes
  */
 async function sendWhatsAppMessage(phone, prompt, contextId = null) {
   const agentId = process.env.GPTMAKER_AGENT_ID;
@@ -48,11 +42,36 @@ async function sendWhatsAppMessage(phone, prompt, contextId = null) {
 }
 
 /**
- * Envia notificação interna (ex: aviso de reunião para o corretor).
- * Usa o mesmo endpoint, com número fixo de destino.
+ * Envia notificação interna para o corretor (Jan) via agente exclusivo.
+ *   GPTMAKER_NOTIFICATION_AGENT_ID → agente separado, isolado do atendimento ao cliente
+ *
+ * Usa o telefone do destinatário como contextId fixo para manter
+ * uma única thread de notificações com o corretor.
  */
 async function sendNotification(toPhone, message) {
-  return sendWhatsAppMessage(toPhone, message, `notif_${Date.now()}`);
+  const agentId = process.env.GPTMAKER_NOTIFICATION_AGENT_ID;
+  if (!agentId) throw new Error('GPTMAKER_NOTIFICATION_AGENT_ID não configurado no .env');
+
+  const phoneDigits = toPhone.replace(/\D/g, '');
+  const body = {
+    phone:     phoneDigits,
+    prompt:    message,
+    contextId: `corretor_${phoneDigits}`, // contexto fixo: uma thread por corretor
+  };
+
+  try {
+    const res = await axios.post(
+      `${API_BASE}/agent/${agentId}/conversation`,
+      body,
+      { headers: buildHeaders() }
+    );
+    console.log(`[gptmaker] Notificação enviada para ${phoneDigits}:`, res.data);
+    return res.data;
+  } catch (err) {
+    console.error(`[gptmaker] Erro ao notificar ${phoneDigits} — status: ${err.response?.status}`);
+    console.error('[gptmaker] Resposta da API:', JSON.stringify(err.response?.data, null, 2));
+    throw err;
+  }
 }
 
 module.exports = { sendWhatsAppMessage, sendNotification };

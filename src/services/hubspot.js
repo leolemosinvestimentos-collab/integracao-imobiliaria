@@ -7,8 +7,9 @@ const BASE_URL = 'https://api.hubapi.com/crm/v3/objects/contacts';
 //   tipo_imovel          → Single-line text  (ou Dropdown: apartamento, casa, cobertura…)
 //   faixa_preco          → Single-line text
 //   prazo_compra         → Single-line text
-const CONTEXT_ID_PROP = 'gptmaker_context_id';
-const CUSTOM_PROPS    = [CONTEXT_ID_PROP, 'tipo_imovel', 'faixa_preco', 'prazo_compra'];
+const CONTEXT_ID_PROP     = 'gptmaker_context_id';
+const NOTIFICADO_PROP     = 'notificacao_enviada'; // Checkbox no HubSpot
+const CUSTOM_PROPS        = [CONTEXT_ID_PROP, NOTIFICADO_PROP, 'tipo_imovel', 'faixa_preco', 'prazo_compra'];
 
 function buildHeaders() {
   const token = process.env.HUBSPOT_ACCESS_TOKEN;
@@ -142,4 +143,37 @@ async function createOrUpdateContact(lead) {
   return upsert('post', BASE_URL, buildProperties(lead), headers);
 }
 
-module.exports = { createOrUpdateContact, searchLeadsByInterest };
+/**
+ * Verifica se o lead já foi notificado (campo notificacao_enviada = true).
+ * Retorna true se já foi notificado, false caso contrário ou se a propriedade não existir.
+ */
+async function isLeadNotificado(contactId) {
+  try {
+    const res = await axios.get(
+      `${BASE_URL}/${contactId}?properties=${NOTIFICADO_PROP}`,
+      { headers: buildHeaders() }
+    );
+    return res.data.properties?.[NOTIFICADO_PROP] === 'true';
+  } catch (err) {
+    logHubSpotError(`isLeadNotificado id=${contactId}`, err);
+    return false; // em caso de erro, permite o envio
+  }
+}
+
+/**
+ * Marca o contato como notificado no HubSpot para evitar duplicatas.
+ */
+async function marcarLeadNotificado(contactId) {
+  try {
+    await axios.patch(
+      `${BASE_URL}/${contactId}`,
+      { properties: { [NOTIFICADO_PROP]: 'true' } },
+      { headers: buildHeaders() }
+    );
+    console.log(`[hubspot] Lead id=${contactId} marcado como notificado.`);
+  } catch (err) {
+    logHubSpotError(`marcarLeadNotificado id=${contactId}`, err);
+  }
+}
+
+module.exports = { createOrUpdateContact, searchLeadsByInterest, isLeadNotificado, marcarLeadNotificado };

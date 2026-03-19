@@ -1,6 +1,6 @@
 const express = require('express');
 const { extractLeadData } = require('../services/extractor');
-const { createOrUpdateContact } = require('../services/hubspot');
+const { createOrUpdateContact, isLeadNotificado, marcarLeadNotificado } = require('../services/hubspot');
 const { sendNotification } = require('../services/gptmaker');
 
 const CORRETOR_PHONE = '5561994000700';
@@ -23,17 +23,27 @@ router.post('/gptmaker', async (req, res) => {
     const contact = await createOrUpdateContact(lead);
     console.log(`[webhook] Contato criado/atualizado no HubSpot: id=${contact.id}`);
 
+    // Verifica se a notificação já foi enviada para este lead
+    const jaNotificado = await isLeadNotificado(contact.id);
+    if (jaNotificado) {
+      console.log(`[webhook] Lead id=${contact.id} já notificado anteriormente — pulando.`);
+      return res.status(200).json({ success: true, hubspot_id: contact.id, lead, notificado: false });
+    }
+
     const mensagem =
       `🔔 Jan! Lead qualificado esperando contato! Nome: ${lead.name || 'Não informado'} | ` +
       `Telefone: ${lead.phone || 'Não informado'} | ` +
       `Interesse: ${lead.tipoImovel || 'Não informado'} | ` +
       `Orçamento: ${lead.faixaPreco || 'Não informado'}. Entre em contato assim que puder!`;
 
+    // Marca ANTES de enviar para evitar duplicata em caso de chamadas simultâneas
+    await marcarLeadNotificado(contact.id);
+
     sendNotification(CORRETOR_PHONE, mensagem).catch(err =>
       console.error('[webhook] Erro ao enviar notificação ao corretor:', err.message)
     );
 
-    return res.status(200).json({ success: true, hubspot_id: contact.id, lead });
+    return res.status(200).json({ success: true, hubspot_id: contact.id, lead, notificado: true });
   } catch (err) {
     console.error('[webhook] Erro ao processar:', err.response?.data ?? err.message);
     return res.status(500).json({ error: 'Erro interno ao processar o webhook.' });
