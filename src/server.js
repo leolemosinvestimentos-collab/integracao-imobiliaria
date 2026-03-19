@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const webhookRouter = require('./routes/webhook');
+const imovelRouter  = require('./routes/imovel');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,6 +13,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/webhook', webhookRouter);
+app.use('/imovel',  imovelRouter);
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);

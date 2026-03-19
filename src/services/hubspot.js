@@ -2,11 +2,13 @@ const axios = require('axios');
 
 const BASE_URL = 'https://api.hubapi.com/crm/v3/objects/contacts';
 
-// Propriedade personalizada para deduplicar pelo contextId do GPT Maker.
-// Crie-a no HubSpot: Settings > Properties > Contact > Create property
-//   Nome interno: gptmaker_context_id  |  Tipo: Single-line text
-// Se a propriedade não existir, o contextId é ignorado sem travar o cadastro.
+// Propriedades customizadas necessárias no HubSpot (Settings > Properties > Contact):
+//   gptmaker_context_id  → Single-line text
+//   tipo_imovel          → Single-line text  (ou Dropdown: apartamento, casa, cobertura…)
+//   faixa_preco          → Single-line text
+//   prazo_compra         → Single-line text
 const CONTEXT_ID_PROP = 'gptmaker_context_id';
+const CUSTOM_PROPS    = [CONTEXT_ID_PROP, 'tipo_imovel', 'faixa_preco', 'prazo_compra'];
 
 function buildHeaders() {
   const token = process.env.HUBSPOT_ACCESS_TOKEN;
@@ -18,9 +20,8 @@ function buildHeaders() {
 }
 
 function logHubSpotError(label, err) {
-  const data = err.response?.data;
   console.error(`[hubspot] ${label} — status: ${err.response?.status}`);
-  console.error('[hubspot] Resposta completa da API:', JSON.stringify(data, null, 2));
+  console.error('[hubspot] Resposta completa da API:', JSON.stringify(err.response?.data, null, 2));
 }
 
 async function searchContact(filterProperty, value) {
@@ -29,33 +30,64 @@ async function searchContact(filterProperty, value) {
     filterGroups: [
       { filters: [{ propertyName: filterProperty, operator: 'EQ', value }] },
     ],
-    properties: ['email', 'firstname', 'lastname', 'phone', CONTEXT_ID_PROP],
+    properties: ['email', 'firstname', 'lastname', 'phone', ...CUSTOM_PROPS],
     limit: 1,
   };
   try {
     const res = await axios.post(url, body, { headers: buildHeaders() });
     return res.data.results?.[0] ?? null;
   } catch (err) {
-    // Se a propriedade customizada não existir, ignora e retorna null
     logHubSpotError(`searchContact por ${filterProperty}`, err);
     return null;
   }
 }
 
-function buildProperties(lead, includeContextId = true) {
+/**
+ * Busca leads no HubSpot cujo tipo_imovel bate com o imóvel anunciado.
+ * Retorna apenas leads que têm telefone preenchido.
+ */
+async function searchLeadsByInterest(tipo, _preco) {
+  const url = 'https://api.hubapi.com/crm/v3/objects/contacts/search';
+
+  const filters = [
+    { propertyName: 'tipo_imovel', operator: 'EQ', value: tipo.toLowerCase() },
+    { propertyName: 'phone',       operator: 'HAS_PROPERTY' },
+  ];
+
+  const body = {
+    filterGroups: [{ filters }],
+    properties: ['firstname', 'lastname', 'email', 'phone', 'tipo_imovel', 'faixa_preco', 'prazo_compra'],
+    limit: 100,
+  };
+
+  try {
+    const res = await axios.post(url, body, { headers: buildHeaders() });
+    return res.data.results ?? [];
+  } catch (err) {
+    logHubSpotError('searchLeadsByInterest', err);
+    throw err;
+  }
+}
+
+function buildProperties(lead, includeCustom = true) {
   const parts = lead.name ? lead.name.split(/\s+/) : [];
   const firstname = parts[0] || '';
   const lastname  = parts.slice(1).join(' ') || '';
 
   const props = {};
-  if (firstname)  props.firstname      = firstname;
-  if (lastname)   props.lastname       = lastname;
-  if (lead.email) props.email          = lead.email;
+  if (firstname)  props.firstname = firstname;
+  if (lastname)   props.lastname  = lastname;
+  if (lead.email) props.email     = lead.email;
 
-  // HubSpot aceita telefone só com dígitos (sem +)
+  // HubSpot aceita telefone sem o +
   if (lead.phone) props.phone = lead.phone.replace(/^\+/, '');
 
-  if (includeContextId && lead.contextId) props[CONTEXT_ID_PROP] = lead.contextId;
+  if (includeCustom) {
+    if (lead.contextId)  props[CONTEXT_ID_PROP] = lead.contextId;
+    if (lead.tipoImovel) props.tipo_imovel       = lead.tipoImovel;
+    if (lead.faixaPreco) props.faixa_preco       = lead.faixaPreco;
+    if (lead.prazoCompra) props.prazo_compra     = lead.prazoCompra;
+  }
 
   props.hs_lead_status = 'NEW';
   props.lifecyclestage = 'lead';
@@ -68,12 +100,14 @@ async function upsert(method, url, properties, headers) {
     const res = await axios({ method, url, data: { properties }, headers });
     return res.data;
   } catch (err) {
-    // Se falhou com contextId, tenta de novo sem ele
-    const hasContextId = CONTEXT_ID_PROP in properties;
-    if (hasContextId && err.response?.status === 400) {
-      logHubSpotError(`${method.toUpperCase()} com contextId falhou, tentando sem`, err);
-      const { [CONTEXT_ID_PROP]: _omit, ...propsWithout } = properties;
-      const res = await axios({ method, url, data: { properties: propsWithout }, headers });
+    // Se falhou por propriedade customizada inexistente, tenta sem elas
+    const hasCustom = CUSTOM_PROPS.some(p => p in properties);
+    if (hasCustom && err.response?.status === 400) {
+      logHubSpotError(`${method.toUpperCase()} com props customizadas falhou, tentando sem`, err);
+      const cleaned = Object.fromEntries(
+        Object.entries(properties).filter(([k]) => !CUSTOM_PROPS.includes(k))
+      );
+      const res = await axios({ method, url, data: { properties: cleaned }, headers });
       return res.data;
     }
     logHubSpotError(`${method.toUpperCase()} ${url}`, err);
@@ -81,10 +115,6 @@ async function upsert(method, url, properties, headers) {
   }
 }
 
-/**
- * Upsert de contato com prioridade:
- *   1. contextId  2. e-mail  3. cria novo
- */
 async function createOrUpdateContact(lead) {
   const headers = buildHeaders();
   let existing = null;
@@ -112,4 +142,4 @@ async function createOrUpdateContact(lead) {
   return upsert('post', BASE_URL, buildProperties(lead), headers);
 }
 
-module.exports = { createOrUpdateContact };
+module.exports = { createOrUpdateContact, searchLeadsByInterest };
