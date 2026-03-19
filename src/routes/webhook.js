@@ -12,8 +12,8 @@ router.post('/gptmaker', async (req, res) => {
 
     const lead = extractLeadData(payload);
 
-    if (!lead.email && !lead.phone) {
-      console.warn('[webhook] Nenhum e-mail ou telefone encontrado — ignorando.');
+    if (!lead.name && !lead.email && !lead.phone) {
+      console.warn('[webhook] Nenhum dado de contato encontrado — ignorando.');
       return res.status(200).json({ skipped: true, reason: 'no_contact_info' });
     }
 
