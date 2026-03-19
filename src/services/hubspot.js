@@ -99,6 +99,12 @@ async function createOrUpdateContact(lead) {
     if (existing) console.log(`[hubspot] Encontrado por email=${lead.email} (id=${existing.id}), atualizando...`);
   }
 
+  if (!existing && lead.phone) {
+    const phoneDigits = lead.phone.replace(/^\+/, '');
+    existing = await searchContact('phone', phoneDigits);
+    if (existing) console.log(`[hubspot] Encontrado por phone=${phoneDigits} (id=${existing.id}), atualizando...`);
+  }
+
   if (existing) {
     return upsert('patch', `${BASE_URL}/${existing.id}`, buildProperties(lead), headers);
   }
