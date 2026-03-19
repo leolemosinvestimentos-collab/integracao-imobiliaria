@@ -5,26 +5,56 @@
  *   1. payload.lead / payload.contact → contactName, name, nome, fullName
  *   2. payload.variables              → mesmos campos
  *   3. payload raiz                   → mesmos campos
- *   4. payload.message (texto livre)  → padrão "Prazer, [Nome]."
- *   5. payload.messages (histórico)   → mesmo padrão + regex de e-mail/telefone
+ *   4. payload.messages (array)       → mensagem do usuário com 1-2 palavras
+ *                                       após pergunta de confirmação de nome
  */
 
 /**
- * Tenta extrair o primeiro nome próprio de frases do tipo:
- *   "Prazer, Leo. Confirma que é seu nome?"
- *   "Oi! Sou a Ana, como posso ajudar?"
- * Retorna string vazia se não encontrar.
+ * Percorre o array de mensagens e tenta identificar o nome do usuário.
+ *
+ * Estratégia:
+ *   - Filtra apenas mensagens enviadas pelo usuário (role: "user" | "human" | ausente)
+ *   - Procura mensagens com 1-2 palavras que pareçam nome próprio (inicial maiúscula)
+ *   - Prioriza mensagem que vem logo após uma pergunta de confirmação do bot
+ *     (ex: "Confirma que é seu nome?", "pode me dizer seu nome?")
  */
-function extractNameFromText(text) {
-  if (!text) return '';
+function extractNameFromMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
 
-  // Padrão 1: "Prazer, Nome." ou "Prazer, Nome Sobrenome."
-  const prazerMatch = text.match(/Prazer[,\s]+([A-ZÁÉÍÓÚÃÕÂÊÔÇÀ][a-záéíóúãõâêôçà]+(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÔÇÀ][a-záéíóúãõâêôçà]+)*)/);
-  if (prazerMatch) return prazerMatch[1];
+  const botRoles   = new Set(['assistant', 'bot', 'system', 'patricia', 'patrícia']);
+  const namePattern = /^[A-ZÁÉÍÓÚÃÕÂÊÔÇÀ][a-záéíóúãõâêôçà]+(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÔÇÀ][a-záéíóúãõâêôçà]+)?$/;
+  const confirmPatterns = /nome|chamo|chama|chamar|confirma|correto|certo/i;
 
-  // Padrão 2: "seu nome é Nome" ou "nome: Nome"
-  const nomeMatch = text.match(/(?:seu nome é|nome[:\s]+)\s*([A-ZÁÉÍÓÚÃÕÂÊÔÇÀ][a-záéíóúãõâêôçà]+(?:\s+[A-ZÁÉÍÓÚÃÕÂÊÔÇÀ][a-záéíóúãõâêôçà]+)*)/i);
-  if (nomeMatch) return nomeMatch[1];
+  // Passa 1: procura mensagem do usuário logo após bot perguntar o nome
+  for (let i = 1; i < messages.length; i++) {
+    const prev = messages[i - 1];
+    const curr = messages[i];
+
+    const prevRole = (prev.role || prev.type || '').toLowerCase();
+    const currRole = (curr.role || curr.type || '').toLowerCase();
+    const prevText = (prev.content || prev.text || prev.message || '').trim();
+    const currText = (curr.content || curr.text || curr.message || '').trim();
+
+    const prevIsBot  = botRoles.has(prevRole) || prevRole === '';
+    const currIsUser = currRole === 'user' || currRole === 'human' || currRole === '';
+
+    if (prevIsBot && currIsUser && confirmPatterns.test(prevText)) {
+      if (namePattern.test(currText)) {
+        return currText;
+      }
+    }
+  }
+
+  // Passa 2: qualquer mensagem do usuário com 1-2 palavras em formato de nome
+  for (const msg of messages) {
+    const role = (msg.role || msg.type || '').toLowerCase();
+    const text = (msg.content || msg.text || msg.message || '').trim();
+    const isUser = role === 'user' || role === 'human' || role === '';
+
+    if (isUser && namePattern.test(text)) {
+      return text;
+    }
+  }
 
   return '';
 }
@@ -48,25 +78,25 @@ function extractLeadData(payload) {
   if (!email) email = payload.email || payload.e_mail || '';
   if (!phone) phone = payload.contactPhone || payload.phone || payload.telefone || payload.celular || payload.whatsapp || '';
 
-  // 4) Extrai nome do campo message (string única) quando contactName vier nulo
-  if (!name && payload.message) {
-    name = extractNameFromText(payload.message);
+  // 4) Varre o array messages buscando o nome digitado pelo usuário
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+
+  if (!name) {
+    name = extractNameFromMessages(messages);
+    if (name) console.log(`[extractor] Nome extraído do histórico de mensagens: "${name}"`);
   }
 
-  // 5) Fallback: busca no histórico de mensagens
-  if (!name || !email || !phone) {
-    const messages = Array.isArray(payload.messages) ? payload.messages : [];
-    const text = messages.map(m => m.content || m.text || m.message || '').join(' ');
-
-    if (!name)  name  = extractNameFromText(text);
+  // 5) Busca e-mail e telefone no texto completo das mensagens
+  if (!email || !phone) {
+    const fullText = messages.map(m => m.content || m.text || m.message || '').join(' ');
 
     if (!email) {
-      const emailMatch = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+      const emailMatch = fullText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
       if (emailMatch) email = emailMatch[0];
     }
 
     if (!phone) {
-      const phoneMatch = text.match(/(\+?\d[\d\s\-().]{7,}\d)/);
+      const phoneMatch = fullText.match(/(\+?\d[\d\s\-().]{7,}\d)/);
       if (phoneMatch) phone = phoneMatch[0].replace(/\D/g, '');
     }
   }
