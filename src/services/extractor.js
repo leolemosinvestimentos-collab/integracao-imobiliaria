@@ -7,9 +7,39 @@
  * e tenta extrair os dados do histórico acumulado.
  */
 
-const { addMessage, getHistory } = require('./history');
+const { addMessage, getHistory, getMessages } = require('./history');
 
 const TIPOS_IMOVEL = ['apartamento', 'casa', 'cobertura', 'studio', 'flat', 'kitnet', 'terreno'];
+
+// Palavras que NÃO são nomes de pessoas
+const PALAVRAS_CHAVE = new Set([
+  'sim', 'não', 'nao', 'ok', 'oi', 'olá', 'ola', 'bom', 'dia', 'boa', 'tarde', 'noite',
+  'comprar', 'vender', 'investir', 'apartamento', 'casa', 'cobertura', 'studio', 'flat',
+  'kitnet', 'terreno', 'quarto', 'quartos', 'suite', 'suíte', 'varanda', 'lazer',
+  'imediato', 'urgente', 'meses', 'anos', 'prazo', 'região', 'bairro', 'lago', 'sul',
+  'norte', 'asa', 'noroeste', 'sudoeste', 'guará', 'taguatinga', 'ceilândia', 'sobradinho',
+  'brasília', 'brasilia', 'df', 'gama', 'samambaia', 'planaltina', 'paranoá',
+  'olha', 'quero', 'tenho', 'preciso', 'gostaria', 'busco', 'procuro',
+]);
+
+function isNome(texto) {
+  if (!texto || texto.trim().length < 2) return false;
+  const t = texto.trim();
+  // Deve começar com letra maiúscula
+  if (!/^[A-ZÁÉÍÓÚÀÂÊÔÃÕÜÇ]/i.test(t)) return false;
+  // Não pode ser só números
+  if (/^\d+$/.test(t)) return false;
+  // Não pode ter pontuação estranha
+  if (/[!@#$%^&*()_+=\[\]{};':"\\|,.<>\/?]/.test(t)) return false;
+  const palavras = t.split(/\s+/);
+  // Entre 1 e 5 palavras
+  if (palavras.length < 1 || palavras.length > 5) return false;
+  // Nenhuma palavra pode ser uma palavra-chave
+  for (const p of palavras) {
+    if (PALAVRAS_CHAVE.has(p.toLowerCase())) return false;
+  }
+  return true;
+}
 
 function extractTipoImovel(text) {
   if (!text) return '';
@@ -37,6 +67,32 @@ function extractPrazoCompra(text) {
 function extractFromSources(...sources) {
   for (const src of sources) {
     if (src && typeof src === 'string' && src.trim()) return src.trim();
+  }
+  return '';
+}
+
+/**
+ * Tenta extrair o nome do cliente do histórico de mensagens.
+ * Estratégia: procura a primeira mensagem que pareça um nome próprio,
+ * geralmente a resposta à pergunta "Qual é o seu nome?".
+ */
+function extractNomeDoHistorico(historyKey) {
+  const messages = getMessages(historyKey);
+  if (!messages || messages.length === 0) return '';
+
+  // Tenta cada mensagem como candidato a nome
+  for (const msg of messages) {
+    const texto = (msg || '').trim();
+    if (isNome(texto)) {
+      return texto;
+    }
+    // Se a mensagem tem múltiplas linhas, tenta cada linha
+    const linhas = texto.split(/\n/);
+    for (const linha of linhas) {
+      if (isNome(linha.trim())) {
+        return linha.trim();
+      }
+    }
   }
   return '';
 }
@@ -135,7 +191,7 @@ function extractLeadData(payload) {
 
   // Fallback 2: histórico acumulado da conversa
   const historico = getHistory(historyKey);
-  if (!tipoImovel || !faixaPreco || !prazoCompra || !name) {
+  if (!tipoImovel || !faixaPreco || !prazoCompra) {
     if (historico) {
       console.log(`[extractor] Usando histórico acumulado (${historico.length} chars) para key=${historyKey}`);
       if (!tipoImovel)  tipoImovel  = extractTipoImovel(historico);
@@ -144,32 +200,24 @@ function extractLeadData(payload) {
     }
   }
 
-  // Fallback 3: usa o contactName do payload como nome se ainda estiver vazio
-  // O GPT Maker envia contactName em algumas mensagens mas não em todas
-  if (!name) {
-    // Tenta extrair o nome do histórico: primeira resposta curta (1-4 palavras) que não seja palavra-chave
-    const PALAVRAS_CHAVE = /^(sim|não|nao|ok|oi|olá|ola|comprar|vender|investir|apartamento|casa|cobertura|studio|flat|kitnet|terreno|\d.*)$/i;
-    const linhas = historico ? historico.split(/\s{2,}|\n/) : [];
-    for (const linha of linhas) {
-      const palavras = linha.trim().split(/\s+/);
-      if (palavras.length >= 1 && palavras.length <= 4 && !PALAVRAS_CHAVE.test(linha.trim())) {
-        name = linha.trim();
-        console.log(`[extractor] Nome extraído do histórico: ${name}`);
-        break;
-      }
+  // Fallback 3: extrai nome do histórico de mensagens individuais
+  if (!name && historyKey) {
+    name = extractNomeDoHistorico(historyKey);
+    if (name) {
+      console.log(`[extractor] Nome extraído do histórico de mensagens: ${name}`);
+    } else {
+      console.log(`[extractor] Nome ainda nulo após histórico — contextId: ${contextId}`);
     }
   }
 
-  if (!name) console.log(`[extractor] Nome ainda nulo após histórico — contextId: ${contextId}`);
-
   const result = {
-    name:        name.trim(),
-    email:       email.trim().toLowerCase(),
-    phone:       phone.trim(),
-    contextId:   contextId.toString().trim(),
-    tipoImovel:  tipoImovel.toLowerCase(),
-    faixaPreco,
-    prazoCompra,
+    name:        (name || '').trim(),
+    email:       (email || '').trim().toLowerCase(),
+    phone:       (phone || '').trim(),
+    contextId:   (contextId || '').toString().trim(),
+    tipoImovel:  (tipoImovel || '').toLowerCase(),
+    faixaPreco:  faixaPreco || '',
+    prazoCompra: prazoCompra || '',
   };
 
   console.log('[extractor] Resultado:', JSON.stringify(result));

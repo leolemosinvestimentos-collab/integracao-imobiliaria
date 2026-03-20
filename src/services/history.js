@@ -49,4 +49,14 @@ function _cleanup() {
   }
 }
 
-module.exports = { addMessage, getHistory };
+/**
+ * Retorna o array de mensagens individuais de uma conversa.
+ * @param {string} key
+ * @returns {string[]}
+ */
+function getMessages(key) {
+  if (!key) return [];
+  return store.get(key)?.messages ?? [];
+}
+
+module.exports = { addMessage, getHistory, getMessages };
