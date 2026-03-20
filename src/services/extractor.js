@@ -2,8 +2,12 @@
  * Extrai nome, telefone, e-mail, contextId e dados de interesse imobiliário
  * do payload do GPT Maker.
  *
- * LOG COMPLETO ativado para diagnóstico dos campos disponíveis.
+ * Como o GPT Maker envia apenas a última mensagem no webhook (não o histórico
+ * completo), este módulo acumula as mensagens por contextId/phone em memória
+ * e tenta extrair os dados do histórico acumulado.
  */
+
+const { addMessage, getHistory } = require('./history');
 
 const TIPOS_IMOVEL = ['apartamento', 'casa', 'cobertura', 'studio', 'flat', 'kitnet', 'terreno'];
 
@@ -40,7 +44,7 @@ function extractLeadData(payload) {
   const lead = payload.lead || payload.contact || {};
   const vars = payload.variables || payload.vars || {};
 
-  // Log de diagnóstico: mostra os campos disponíveis nas fontes principais
+  // Log de diagnóstico
   console.log('[extractor] lead:', JSON.stringify(lead));
   console.log('[extractor] vars:', JSON.stringify(vars));
   console.log('[extractor] payload (raiz):', JSON.stringify({
@@ -57,6 +61,7 @@ function extractLeadData(payload) {
     prazoCompra:  payload.prazoCompra,
     contextId:    payload.contextId,
     sessionId:    payload.sessionId,
+    message:      payload.message,
   }));
 
   // --- Identificação ---
@@ -91,8 +96,14 @@ function extractLeadData(payload) {
 
   if (!name) console.log(`[extractor] contactName nulo — contextId: ${contextId}`);
 
-  // --- Interesse imobiliário ---
-  // Tenta nomes em snake_case e camelCase nas três fontes
+  // --- Acumula a mensagem atual no histórico ---
+  const historyKey = contextId || phone;
+  const currentMessage = payload.message || '';
+  if (historyKey && currentMessage) {
+    addMessage(historyKey, currentMessage);
+  }
+
+  // --- Interesse imobiliário: tenta variáveis primeiro, depois histórico ---
   let tipoImovel = extractFromSources(
     lead.tipo_imovel,  lead.tipoImovel,  lead.tipo,
     vars.tipo_imovel,  vars.tipoImovel,  vars.tipo,
@@ -111,17 +122,28 @@ function extractLeadData(payload) {
     payload.prazo_compra, payload.prazoCompra, payload.prazo
   );
 
-  // Fallback: extrai por regex do texto da conversa
-  const textoConversa = [
-    payload.message || '',
+  // Fallback 1: texto da mensagem atual
+  const textoAtual = [
+    currentMessage,
     ...(Array.isArray(payload.messages)
       ? payload.messages.map(m => m.content || m.text || m.message || '')
       : []),
   ].join(' ');
 
-  if (!tipoImovel)  tipoImovel  = extractTipoImovel(textoConversa);
-  if (!faixaPreco)  faixaPreco  = extractFaixaPreco(textoConversa);
-  if (!prazoCompra) prazoCompra = extractPrazoCompra(textoConversa);
+  if (!tipoImovel)  tipoImovel  = extractTipoImovel(textoAtual);
+  if (!faixaPreco)  faixaPreco  = extractFaixaPreco(textoAtual);
+  if (!prazoCompra) prazoCompra = extractPrazoCompra(textoAtual);
+
+  // Fallback 2: histórico acumulado da conversa
+  if (!tipoImovel || !faixaPreco || !prazoCompra) {
+    const historico = getHistory(historyKey);
+    if (historico) {
+      console.log(`[extractor] Usando histórico acumulado (${historico.length} chars) para key=${historyKey}`);
+      if (!tipoImovel)  tipoImovel  = extractTipoImovel(historico);
+      if (!faixaPreco)  faixaPreco  = extractFaixaPreco(historico);
+      if (!prazoCompra) prazoCompra = extractPrazoCompra(historico);
+    }
+  }
 
   const result = {
     name:        name.trim(),

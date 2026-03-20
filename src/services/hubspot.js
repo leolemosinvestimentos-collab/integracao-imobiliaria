@@ -3,13 +3,13 @@ const axios = require('axios');
 const BASE_URL = 'https://api.hubapi.com/crm/v3/objects/contacts';
 
 // Propriedades customizadas necessárias no HubSpot (Settings > Properties > Contact):
-//   gptmaker_context_id  → Single-line text
+//   notificacao_enviada  → Single-line text (ou Checkbox)
 //   tipo_imovel          → Single-line text  (ou Dropdown: apartamento, casa, cobertura…)
 //   faixa_preco          → Single-line text
 //   prazo_compra         → Single-line text
-const CONTEXT_ID_PROP     = 'gptmaker_context_id';
-const NOTIFICADO_PROP     = 'notificacao_enviada'; // Checkbox no HubSpot
-const CUSTOM_PROPS        = [CONTEXT_ID_PROP, NOTIFICADO_PROP, 'tipo_imovel', 'faixa_preco', 'prazo_compra'];
+// NOTA: gptmaker_context_id foi removido pois não existe no HubSpot e causava VALIDATION_ERROR.
+const NOTIFICADO_PROP     = 'notificacao_enviada';
+const CUSTOM_PROPS        = [NOTIFICADO_PROP, 'tipo_imovel', 'faixa_preco', 'prazo_compra'];
 
 function buildHeaders() {
   const token = process.env.HUBSPOT_ACCESS_TOKEN;
@@ -84,7 +84,6 @@ function buildProperties(lead, includeCustom = true) {
   if (lead.phone) props.phone = lead.phone.replace(/^\+/, '');
 
   if (includeCustom) {
-    if (lead.contextId)  props[CONTEXT_ID_PROP] = lead.contextId;
     if (lead.tipoImovel) props.tipo_imovel       = lead.tipoImovel;
     if (lead.faixaPreco) props.faixa_preco       = lead.faixaPreco;
     if (lead.prazoCompra) props.prazo_compra     = lead.prazoCompra;
@@ -119,11 +118,6 @@ async function upsert(method, url, properties, headers) {
 async function createOrUpdateContact(lead) {
   const headers = buildHeaders();
   let existing = null;
-
-  if (lead.contextId) {
-    existing = await searchContact(CONTEXT_ID_PROP, lead.contextId);
-    if (existing) console.log(`[hubspot] Encontrado por contextId=${lead.contextId} (id=${existing.id}), atualizando...`);
-  }
 
   if (!existing && lead.email) {
     existing = await searchContact('email', lead.email);
