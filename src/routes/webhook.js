@@ -23,27 +23,15 @@ router.post('/gptmaker', async (req, res) => {
     const contact = await createOrUpdateContact(lead);
     console.log(`[webhook] Contato criado/atualizado no HubSpot: id=${contact.id}`);
 
-     // Verifica se o lead está qualificado (tem nome, interesse e orçamento)
- const isQualificado = lead.name && lead.tipoImovel && lead.faixaPreco;
+    // Verifica se o lead está qualificado (tem nome, interesse e orçamento)
+    const isQualificado = lead.name && lead.tipoImovel && lead.faixaPreco;
 
- if (!isQualificado) {
-   console.log(`[webhook] Lead id=${contact.id} ainda não está totalmente qualificado. Aguardando mais dados.`);
-   return res.status(200).json({ success: true, hubspot_id: contact.id, lead, notificado: false, reason: 'not_qualified_yet' });
- }
+    if (!isQualificado) {
+      console.log(`[webhook] Lead id=${contact.id} ainda não está totalmente qualificado. Aguardando mais dados.`);
+      return res.status(200).json({ success: true, hubspot_id: contact.id, lead, notificado: false, reason: 'not_qualified_yet' });
+    }
 
- // Verifica se a notificação já foi enviada para este lead
- const jaNotificado = await isLeadNotificado(contact.id);
- if (jaNotificado) {
-   console.log(`[webhook] Lead id=${contact.id} já notificado anteriormente — pulando.`);
-   return res.status(200).json({ success: true, hubspot_id: contact.id, lead, notificado: false });
- }
-
- const mensagem =
-   `🔔 Jan! Lead qualificado esperando contato! Nome: ${lead.name} | ` +
-   `Telefone: ${lead.phone || 'Não informado'} | ` +
-   `Interesse: ${lead.tipoImovel} | ` +
-   `Orçamento: ${lead.faixaPreco}. Entre em contato assim que puder!`;
-
+    // Verifica se a notificação já foi enviada para este lead
     const jaNotificado = await isLeadNotificado(contact.id);
     if (jaNotificado) {
       console.log(`[webhook] Lead id=${contact.id} já notificado anteriormente — pulando.`);
@@ -51,10 +39,10 @@ router.post('/gptmaker', async (req, res) => {
     }
 
     const mensagem =
-      `🔔 Jan! Lead qualificado esperando contato! Nome: ${lead.name || 'Não informado'} | ` +
+      `🔔 Jan! Lead qualificado esperando contato! Nome: ${lead.name} | ` +
       `Telefone: ${lead.phone || 'Não informado'} | ` +
-      `Interesse: ${lead.tipoImovel || 'Não informado'} | ` +
-      `Orçamento: ${lead.faixaPreco || 'Não informado'}. Entre em contato assim que puder!`;
+      `Interesse: ${lead.tipoImovel} | ` +
+      `Orçamento: ${lead.faixaPreco}. Entre em contato assim que puder!`;
 
     // Marca ANTES de enviar para evitar duplicata em caso de chamadas simultâneas
     await marcarLeadNotificado(contact.id);
