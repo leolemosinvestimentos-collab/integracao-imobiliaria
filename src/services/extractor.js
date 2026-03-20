@@ -19,8 +19,9 @@ function extractTipoImovel(text) {
 
 function extractFaixaPreco(text) {
   if (!text) return '';
+  // Exige obrigatoriamente R$, mil ou milhão para evitar capturar números soltos
   const match = text.match(
-    /R?\$?\s*\d+[\d.,]*\s*(?:mi(?:lhões?|lhao)?|mil)?\s*(?:-|a|até)?\s*R?\$?\s*\d*[\d.,]*\s*(?:mi(?:lhões?|lhao)?|mil)?/i
+    /(?:R\$\s*\d+[\d.,]*(?:\s*(?:mi(?:lhões?|lhao)?|mil))?(?:\s*(?:-|a|até)\s*R?\$?\s*\d+[\d.,]*(?:\s*(?:mi(?:lhões?|lhao)?|mil))?)?|\d+[\d.,]*\s*(?:mi(?:lhões?|lhao)?|mil)(?:\s*(?:-|a|até)\s*\d*[\d.,]*\s*(?:mi(?:lhões?|lhao)?|mil))?)/i
   );
   return match ? match[0].trim() : '';
 }
@@ -94,8 +95,6 @@ function extractLeadData(payload) {
     payload.contextId, payload.context_id, payload.sessionId, payload.session_id
   );
 
-  if (!name) console.log(`[extractor] contactName nulo — contextId: ${contextId}`);
-
   // --- Acumula a mensagem atual no histórico ---
   const historyKey = contextId || phone;
   const currentMessage = payload.message || '';
@@ -135,8 +134,8 @@ function extractLeadData(payload) {
   if (!prazoCompra) prazoCompra = extractPrazoCompra(textoAtual);
 
   // Fallback 2: histórico acumulado da conversa
-  if (!tipoImovel || !faixaPreco || !prazoCompra) {
-    const historico = getHistory(historyKey);
+  const historico = getHistory(historyKey);
+  if (!tipoImovel || !faixaPreco || !prazoCompra || !name) {
     if (historico) {
       console.log(`[extractor] Usando histórico acumulado (${historico.length} chars) para key=${historyKey}`);
       if (!tipoImovel)  tipoImovel  = extractTipoImovel(historico);
@@ -144,6 +143,24 @@ function extractLeadData(payload) {
       if (!prazoCompra) prazoCompra = extractPrazoCompra(historico);
     }
   }
+
+  // Fallback 3: usa o contactName do payload como nome se ainda estiver vazio
+  // O GPT Maker envia contactName em algumas mensagens mas não em todas
+  if (!name) {
+    // Tenta extrair o nome do histórico: primeira resposta curta (1-4 palavras) que não seja palavra-chave
+    const PALAVRAS_CHAVE = /^(sim|não|nao|ok|oi|olá|ola|comprar|vender|investir|apartamento|casa|cobertura|studio|flat|kitnet|terreno|\d.*)$/i;
+    const linhas = historico ? historico.split(/\s{2,}|\n/) : [];
+    for (const linha of linhas) {
+      const palavras = linha.trim().split(/\s+/);
+      if (palavras.length >= 1 && palavras.length <= 4 && !PALAVRAS_CHAVE.test(linha.trim())) {
+        name = linha.trim();
+        console.log(`[extractor] Nome extraído do histórico: ${name}`);
+        break;
+      }
+    }
+  }
+
+  if (!name) console.log(`[extractor] Nome ainda nulo após histórico — contextId: ${contextId}`);
 
   const result = {
     name:        name.trim(),
