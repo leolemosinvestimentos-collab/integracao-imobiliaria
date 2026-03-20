@@ -56,7 +56,8 @@ async function sendNotification(toPhone, message) {
   const body = {
     phone:     phoneDigits,
     prompt:    message,
-    contextId: `corretor_${phoneDigits}`, // contexto fixo: uma thread por corretor
+    contextId: `corretor_${phoneDigits}_${Date.now()}`,
+
   };
 
   try {
