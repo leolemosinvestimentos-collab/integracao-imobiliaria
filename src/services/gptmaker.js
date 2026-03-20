@@ -49,8 +49,8 @@ async function sendWhatsAppMessage(phone, prompt, contextId = null) {
  * uma única thread de notificações com o corretor.
  */
 async function sendNotification(toPhone, message) {
-  const agentId = process.env.GPTMAKER_NOTIFICATION_AGENT_ID;
-  if (!agentId) throw new Error('GPTMAKER_NOTIFICATION_AGENT_ID não configurado no .env');
+  const agentId = process.env.GPTMAKER_NOTIFICATION_AGENT_ID || process.env.GPTMAKER_AGENT_ID;
+  if (!agentId) throw new Error('GPTMAKER_NOTIFICATION_AGENT_ID e GPTMAKER_AGENT_ID não configurados no .env');
 
   const phoneDigits = toPhone.replace(/\D/g, '');
   const body = {
